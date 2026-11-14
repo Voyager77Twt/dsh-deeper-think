@@ -1,0 +1,16 @@
+# dependencies (none committed)
+node_modules/
+
+# build artifacts
+*.zip
+dist/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

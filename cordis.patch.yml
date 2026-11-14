@@ -1,0 +1,4 @@
+# dsh-deeper-think bundle patch（由 package.json 的 dsh.bundle.patch 引用）
+- insert:
+    - id: dsh-deeper-think
+      name: 'dsh-deeper-think'

@@ -1,0 +1,35 @@
+{
+  "name": "dsh-deeper-think",
+  "version": "0.1.9",
+  "private": true,
+  "type": "module",
+  "description": "v5 protocol toggle for no-oracle tasks: structured evidence + host-side falsifiable checks",
+  "author": "七七 (Voyager77Twt)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Voyager77Twt/dsh-deeper-think.git"
+  },
+  "homepage": "https://github.com/Voyager77Twt/dsh-deeper-think#readme",
+  "bugs": {
+    "url": "https://github.com/Voyager77Twt/dsh-deeper-think/issues"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  }
+}
