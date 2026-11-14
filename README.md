@@ -1,264 +1,264 @@
 # dsh-deeper-think
 
-**English** | [简体中文](README.zh-CN.md)
+[English](README.md) | **简体中文**
 
-A DSH Desktop composer plugin that spends the extra tokens on **falsifiable checks for questions without an oracle** — rather than on longer answers — and verifies that the model actually performed those checks.
+给 DSH Desktop 的模型选择器加一个闪电开关：开启后，多花的 token 不是用来写更长的回答，而是用来产出**对无标准答案（无 oracle）问题的可证伪检查**；插件还会验证模型真的执行了这些检查，而不是口头宣称。
 
-The plugin does not make the model smarter; it replaces the stopping criterion ("looks right") with "the checklist is settled", externalizes the evidence as a structured block, and runs a deterministic checker on every step.
+插件不让模型变聪明，而是把停止判据从"看起来对"换成"清单结清"：要求模型把必要证据写进结构化块，宿主用确定性检查器逐步校验。
 
-- Package: `dsh-deeper-think`
-- Version: `0.1.9`
-- Author: 七七 (Voyager77Twt)
-- License: MIT
-- Compatibility: DSH Desktop 0.2.x (tested with `agent/pre-step`, `tools/pre-execute`, `tools/post-execute`, `session/event`); Python 3 (tested 3.12) for the checker; Windows for the offline installer
+- 包名：`dsh-deeper-think`
+- 版本：`0.1.9`
+- 作者：七七（Voyager77Twt）
+- 许可：MIT
+- 兼容：DSH Desktop 0.2.x（实测 `agent/pre-step`、`tools/pre-execute`、`tools/post-execute`、`session/event`）；检查器需要 Python 3（实测 3.12）；离线安装脚本面向 Windows
 
-The checker runs outside the model. Without Python it reports "not run" instead of silently passing. The plugin does not sandbox the model; see [Limitations](#8-limitations-and-threat-model).
-
----
-
-## Quick start
-
-> **0.1.9 is an early internal build.** The protocol and rule set may still change. Test on a copy of your data and keep backups.
-
-1. Install via **Settings → Plugins** (plugin manager / marketplace channel), or run `install.ps1` offline;
-2. Turn on the lightning next to the model selector;
-3. Ask a question without a verifiable oracle (for example, "check whether this UI state is consistent with the spec");
-4. Watch for the injected `[dsh-deeper-think]` card and the `v5check：x/25` verdict (typical block) in the next turn.
-
-The plugin is only active while the switch is on. When it is off, DSH behaves exactly as before.
+检查器跑在模型之外；没有 Python 时报告"未运行"，不会假装通过。插件不对模型做沙箱隔离；见[限制](#8-限制与威胁模型)。
 
 ---
 
-## Flow map
+## 快速开始
+
+> **0.1.9 是内测早期版本**，协议与规则仍可能调整。请先在资料副本上测试并保留备份。
+
+1. 设置 → 插件 → 安装本包（插件管理器/商城通道），或离线运行 `install.ps1`；
+2. 点亮模型选择器左侧的闪电；
+3. 提一个没有可验证标准答案的问题（例如"检查这个界面状态是否与规格一致"）；
+4. 观察注入的 `[dsh-deeper-think]` 卡片，以及下一轮开头的 `v5check：x/25` 结论（典型块）。
+
+插件只在开关打开时生效；关闭时 DSH 行为与之前完全一致。
+
+---
+
+## 流程导图
 
 ```mermaid
 flowchart TD
-  U["User clicks lightning"] -->|"POST /dsh-deeper-think/set"| S["Host: seats (per session)"]
-  S --> T["turn/start: snapshot turnOn (sticky)"]
-  T --> P["agent/pre-step: inject short discipline card + pending verdict"]
-  P --> M["Model generates answer"]
-  M --> G{"tools/pre-execute: trace file?"}
-  G -->|"yes"| D["deny + reason"]
-  G -->|"no"| W["allow artifact write"]
-  W --> H["tools/post-execute: hint only on success"]
-  M --> E["step/end: extract JSON block"]
-  E -->|"block found"| C["v5check.py: 27 rules (25 typical)"]
-  E -->|"no block"| R["record: no structured block"]
-  C -->|"pass"| OK["continue"]
-  C -->|"fail"| X["inject correction into next step (same turn)"]
+  U["用户点亮闪电"] -->|"POST /dsh-deeper-think/set"| S["宿主: seats（按会话）"]
+  S --> T["turn/start: 快照 turnOn（粘滞）"]
+  T --> P["agent/pre-step: 注入短纪律卡 + 待办结论"]
+  P --> M["模型生成回答"]
+  M --> G{"tools/pre-execute: 留痕文件?"}
+  G -->|"是"| D["拒绝并给理由"]
+  G -->|"否"| W["放行产物写入"]
+  W --> H["tools/post-execute: 仅成功才提示"]
+  M --> E["step/end: 抽取 JSON 块"]
+  E -->|"找到块"| C["v5check.py: 27 条（典型 25）"]
+  E -->|"没有块"| R["记录: 未找到结构化块"]
+  C -->|"通过"| OK["继续"]
+  C -->|"失败"| X["同回合下一步注入修正"]
   X --> P
-  R --> Z["turn/end: carry verdict to next turn"]
+  R --> Z["turn/end: 结论带到下一轮"]
   OK --> Z
   Z --> P
 ```
 
-Mind map of the same flow:
+同一流程的思维导图：
 
 ```text
 dsh-deeper-think
-├─ trigger
-│  ├─ lightning toggle (client.js, per session)
-│  └─ turn snapshot (turnOn, sticky)
-├─ per step
-│  ├─ pre-step: discipline card (seven steps + block schema + cost budget)
-│  ├─ pre-execute: deny six trace files, allow artifacts
-│  └─ post-execute: success-only write hint
-├─ verification
-│  ├─ step/end: extract JSON block from the answer
-│  ├─ v5check.py: 27 rules (25 typical) — boundary / necessary conditions / criteria / demos / order & honesty
-│  └─ fail: correction injected into the same turn
-└─ settlement
-   ├─ turn/end: verdict (pass, fail, or missing block)
-   └─ next turn: verdict carried into the pre-step card
+├─ 触发
+│  ├─ 闪电开关（client.js，按会话）
+│  └─ 回合快照（turnOn，粘滞）
+├─ 每一步
+│  ├─ pre-step：纪律卡（七步 + 块格式 + 成本纪律）
+│  ├─ pre-execute：拦 6 类留痕文件，放行产物
+│  └─ post-execute：成功才提示"已写出"
+├─ 校验
+│  ├─ step/end：从回答里抽 JSON 块
+│  ├─ v5check.py：27 条（典型 25）——边界/必要条件/判据/演示/顺序与诚实
+│  └─ 失败：同回合注入修正
+└─ 结清
+   ├─ turn/end：结论（通过/失败/缺块）
+   └─ 下一轮：结论拼进纪律卡
 ```
 
-The five in-memory ledgers that make this work:
+支撑这套流程的五本内存账本：
 
-| Ledger | Holds | Why it exists |
+| 账本 | 记什么 | 为什么需要 |
 |---|---|---|
-| `seats` | on/off per session | state sent by the button |
-| `turnOn` | snapshot at `turn/start` | a mid-turn off must not break the current turn |
-| `lastText` | latest assistant text | source for block extraction |
-| `pending` | message for the next step/turn | hooks cannot rewrite the message just produced |
-| `checked` | fingerprint of checked text | avoid re-running the checker on the same text |
+| `seats` | 每个会话开/关 | 按钮送来的状态 |
+| `turnOn` | `turn/start` 时的快照 | 中途关闭不影响本轮 |
+| `lastText` | 最近一条助手正文 | 抽结构化块用 |
+| `pending` | 下一步/下一轮要贴给模型的话 | 钩子改不了"刚生成的那条消息" |
+| `checked` | 已检查文本的指纹 | 同一段文字不重复跑检查器 |
 
-Restart clears all in-memory state: the switch defaults to off and DSH behaves as before.
+重启会清空全部内存状态：开关默认关闭，DSH 行为与之前一致。
 
 ---
 
-## 1. Why: verification without an oracle
+## 1. 为什么：没有标准答案时怎么验
 
-When there is no oracle, "verify" cannot mean "compare with the correct answer". It can only mean **falsification**: find a necessary condition that any correct result must satisfy, and check whether it is violated. A violation proves an error; satisfying the condition does not prove correctness (a one-sided test) [1].
+没有 oracle 时，"验证"不可能是"和正确答案比对"，只能是**证伪**：找一个任何正确结果都必须满足的必要条件，看它有没有被违反。违反 ⇒ 必然错；满足 ⇒ 不能说明对（单侧检验）[1]。
 
-Three families of necessary conditions have established engineering practice:
+工程上成熟的三类必要条件：
 
-| Family | Necessary condition | Established method |
+| 类别 | 必要条件 | 成熟方法 |
 |---|---|---|
-| Inventory | Everything required is present; nothing extra | Inspection checklists [8] |
-| Metamorphic | A semantics-preserving transformation preserves a relation | Metamorphic testing [2], [3] |
-| Consistency | Two representations of the same information agree | Differential testing [6]; N-version [7] |
+| 清点 | 该有的都在，不该有的没有 | 审查检查单 [8] |
+| 变质 | 不改变语义的变换必须保持某个关系 | 变质测试 [2]、[3] |
+| 一致 | 同一信息的两种表示必须相等 | 差分测试 [6]；N 版本 [7] |
 
-The plugin also refuses to trust the model's self-report: self-correction without external feedback is unreliable [9], and iterative self-critique is weak even when the critique content is correct [10]. The checker therefore runs **outside** the model, in the host.
+插件也不相信模型的自述：无外部反馈时自我纠错不可靠 [9]，迭代自我批评效果也弱 [10]。所以检查器放在**模型之外**、宿主之内。
 
 ---
 
-## 2. What it does
+## 2. 它做什么
 
-- **Per-conversation toggle** next to the model selector (hollow = off, filled = on). Default off; state resets on restart.
-- **Sticky per turn**: the switch is snapshotted at `turn/start`; turning it off mid-turn does not break the current turn.
-- **Per-step discipline card**: a short injected message (~300–500 tokens) with the seven steps, the three necessary-condition sections, the block schema, and a cost budget.
-- **No trace files**: writes to `boundary.md`, `criteria.md`, `pre.md`, `acceptance.md`, `demo_runs.txt`, `settle.md` are denied. Artifacts are still written normally.
-- **Per-step verification**: at `step/end`, the host extracts the JSON block from the assistant text, writes it to a temporary file, runs `v5check.py` (up to 27 rules; 25 on a typical block), and injects failures back as `⚠ structured block failed: …` for the same turn.
-- **Turn-end fallback**: if no block, or still failing, the verdict is carried into the next turn.
-- **Truthful write hints**: "artifact written" is emitted only when the write actually succeeded (`result.isError` respected).
+- **按会话开关**：模型选择器左侧闪电（空心=关，实心=开）；默认关，重启复位。
+- **回合粘滞**：`turn/start` 快照开关状态；中途关掉不影响本轮。
+- **每步纪律卡**：注入一条约 300–500 token 的短消息，含七步流程、三件套、块格式与成本纪律。
+- **不留痕文件**：拦截 `boundary.md`、`criteria.md`、`pre.md`、`acceptance.md`、`demo_runs.txt`、`settle.md`；产物照常落盘。
+- **每步校验**：`step/end` 抽取回答里的 JSON 块，写临时文件，跑 `v5check.py`（最多 27 条；典型块 25 条）；失败注入 `⚠ 本步骤结构化块未通过：…`。
+- **回合末兜底**：没块或仍失败，结论带到下一轮。
+- **不假报**：只有真正写入成功才提示"产物已写出"（检查 `result.isError`）。
 
 ```
-client.js ──POST /dsh-deeper-think/set──▶ index.js (seats)
+client.js ──POST /dsh-deeper-think/set──▶ index.js（seats）
                                              │
-                           turn/start ──▶ snapshot (sticky)
+                           turn/start ──▶ 快照（粘滞）
                                              │
-                         agent/pre-step ──▶ short discipline card
+                         agent/pre-step ──▶ 短纪律卡
                                              │
-                      tools/pre-execute ──▶ deny trace files only
+                      tools/pre-execute ──▶ 只拦留痕文件
                                              │
-                         step/end ──▶ extract JSON block ──▶ v5check.py (27 rules; 25 typical)
-                                             │ fail
-                         next pre-step ◀── correction (same turn)
+                         step/end ──▶ 抽 JSON 块 ──▶ v5check.py（27 条；典型 25）
+                                             │ 失败
+                         next pre-step ◀── 同回合修正
                                              │
-                         turn/end ──▶ verdict carried to next turn
+                         turn/end ──▶ 结论带到下一轮
 ```
 
 ---
 
-## 3. Components
+## 3. 部件清单
 
-| Component | Responsibility | Why it exists | How it is enforced |
+| 部件 | 职责 | 为什么存在 | 如何保证 |
 |---|---|---|---|
-| `lib/client.js` | Lightning button, per-session state, DOM updates, tooltip | Avoid React re-render churn and state drift | 11-item smoke test |
-| `lib/index.js` | Host entry; HTTP route `/dsh-deeper-think`; `seats` map | Browser and model run in different environments | Route responds `{"ok":true,"on":…}`; every set logged |
-| `lib/v5.js` | Turn snapshot, discipline card, trace-file gate, write hints, block extraction, step/turn-end checks, correction | The model cannot be trusted to check itself; DSH cannot rewrite the message just produced, so correction lands on the next step of the same turn | Unit tests for sticky switch, in-turn correction, denied-write hint |
-| `lib/checkers/v5check.py` | 27 deterministic rules over the block (25 emitted on a typical block) | A check that can fail is the difference between verification and ritual | Compliant sample 25/25; block without the three sections 20/25 (`A3-1`, `A5-1`, `A4-1`, `INV1`, `KIND1`) |
-| `package.json` | `dsh.bundle.patch` + `dsh.client` declarations | Installed via the plugin manager (marketplace channel) | Installed as a versioned generation |
-| `cordis.patch.yml` | Inserts the plugin row for bundle composition | Standard DSH packaging | Composed by the profile's bundle list |
-| `install.ps1` / `uninstall.ps1` | Offline fallback install into `vendor/` + user patch layer | Not every build has the marketplace path | Idempotent; strips BOM from `package.json`; backs up `cordis.patch.yml` |
+| `lib/client.js` | 闪电按钮、按会话状态、DOM、提示 | 避免 React 重渲染与状态漂移 | 冒烟 11 项 |
+| `lib/index.js` | 宿主入口；HTTP 路由 `/dsh-deeper-think`；`seats` | 浏览器与模型进程隔离 | 路由回读 `{"ok":true,…}`；每次 set 记日志 |
+| `lib/v5.js` | 回合快照、纪律卡、留痕禁令、写后提示、抽块、步末/回合末校验、修正 | 不能信模型自查；DSH 改不了刚生成的消息，只能下一步返工 | 单测：粘滞开关、同回合修正、被拒不提示 |
+| `lib/checkers/v5check.py` | 对块跑 27 条确定性规则（典型块 25 条） | 能失败的检查才是验证，否则是仪式 | 合规样例 25/25；缺三件套的旧块 20/25（`A3-1/A5-1/A4-1/INV1/KIND1` 失败） |
+| `package.json` | `dsh.bundle.patch` + `dsh.client` 声明 | 走插件管理器（商城通道）安装 | 以版本化生成代安装 |
+| `cordis.patch.yml` | bundle 插入行 | DSH 标准打包 | 由 profile 的 bundle 列表组合 |
+| `install.ps1` / `uninstall.ps1` | 离线兜底：装到 `vendor/` + 用户补丁层 | 并非所有构建都有商城通道 | 幂等；去 `package.json` BOM；备份补丁层 |
 
-### What the rules check (27 in total, 25 in a typical run)
+### 这些规则到底在查什么（共 27 条，典型 25 条）
 
-Each code asks one simple question. Some rules are **conditional**: when the matching field is absent they are skipped. `A1` and `D1` are optional ledgers, so a typical block emits 25 checks; `v5check: x/25` counts the checks actually emitted.
+每个代号只问一个简单问题。有些规则是**条件触发的**：对应字段没写时跳过。`A1`、`D1` 属于可选的账本，所以典型块发 25 条；`v5check：x/25` 里的数字是这次实际发出的检查数。
 
-**Boundary — did you say what "done" means?**
+**边界——有没有说清"做完"是什么样？**
 
-- `B1` **Eight dimensions, at least six.** Describe the task along at least six of: scope, quantifier, exceptions, priority, format, unit, definition, hidden dependencies. *Example:* not "count the users" but "all 12 rows, no exceptions, score 60 included".
-- `B2` **At least one ambiguity.** A place where the question can be read two ways, written as reading A, reading B, the difference, which reading you chose, and why. *Example:* "60 counts as pass" vs "60 does not" — the difference is 2 rows.
-- `B3` **Extra dimensions need a reason.** If you add a dimension beyond the eight, say why it matters here.
+- `B1` **八维至少写六个**：范围、量词、例外、优先级、格式、单位、口径、隐含依赖。例：不要写"统计用户"，要写"全部 12 行、无例外、含 60 分"。
+- `B2` **至少写一组歧义**：同一句话的两种读法、差多少、采用哪个、为什么。例："60 算及格"与"60 不算"差 2 条。
+- `B3` **自己加的维度要写理由**：超出八维的维度，说明为什么这里需要。
 
-**Necessary conditions — the core of no-oracle verification**
+**必要条件——无标准答案时的核心**
 
-- `A3-1` **Inventory.** List what must exist (from the source) and whether it exists (in the product), item by item. If the source cannot be enumerated, write `{"na":"reason"}` instead of leaving it empty. *Example:* 8 required fields, 8 columns in the table, none missing.
-- `A5-1` **Metamorphic relation.** Pick a change that should not change the answer (shuffle rows, scale the canvas), state the relation that must hold, and record the actual result. *Example:* shuffle records → count stays 7.
-- `A4-1` **Consistency.** Compare two representations of the same fact. *Example:* the reported count is 7 and the id list has length 7.
+- `A3-1` **清点**：源里该有什么、产物里有没有，逐项对。源不可枚举就写 `{"na":"原因"}`。例：要求 8 个字段，表里正好 8 列，一个不少。
+- `A5-1` **变质**：选一个不该改变答案的改动（打乱行序、放大画布），写出必须保持的关系，再写实测结果。例：打乱记录后计数仍是 7。
+- `A4-1` **一致**：同一事实的两种表示要对账。例：数字写 7，id 列表长度也应是 7。
 
-**Criteria — what exactly are you checking?**
+**判据——到底在查什么？**
 
-- `T1` **Point to a concrete thing.** Every criterion must reference an entity (`#id`, `id=`, a row or line), not "looks fine overall".
-- `T4` **Source shape.** A source must be a URL, "未核" (unverified), or a derivation with a number ("推导 7=7"). Bare claims like "standard practice" fail.
-- `TOL` **Tolerance.** Each criterion needs a tolerance containing a number; missing or larger than 5 fails. This stops "±100 is fine".
-- `V1` **Definition scope.** If a criterion declares a scope, it cannot be vague ("the whole file", "all"). Say which part.
-- `T3` **One demo per criterion.** Every criterion id must appear in `demos`.
-- `INV1` **Legal kind.** Every criterion is tagged `清点` / `变质` / `一致` / `边界`.
-- `KIND1` **At least two of the three.** Among the criteria, at least two of inventory / metamorphic / consistency must be present.
-- `A1` **Requirement coverage** (optional). If a `requirements` list is present, every requirement must be claimed by an existing criterion, and every criterion must be claimed by some requirement.
-- `D1` **Search ledger** (optional). If a `searches` list is present, each entry needs a query, what was opened, an excerpt, and what it supports.
+- `T1` **引用实体**：每条判据要指向具体对象（`#id`、`id=`、某行/某段），不能写"整体看起来对"。
+- `T4` **来源形状**：来源只能是 URL、"未核"、或带数字的推导（"推导 7=7"）。只写"标准做法"不算。
+- `TOL` **容差**：每条要给带数字的容差；漏写或大于 5 判失败，防止"±100 都算对"。
+- `V1` **定义域**：写了定义域就不能含糊（"整个文件""全部"），要说清哪一部分。
+- `T3` **每条判据有演示**：每个判据 id 都要在 `demos` 里出现。
+- `INV1` **合法 kind**：每条判据标成 清点 / 变质 / 一致 / 边界。
+- `KIND1` **三类至少覆盖两类**：清点、变质、一致里至少出现两类。
+- `A1` **需求点认领（可选）**：提供了 `requirements` 时，每条需求要由已有判据认领，且每条判据都要被某条需求认领。
+- `D1` **检索账本（可选）**：提供了 `searches` 时，每条要写检索式、打开了什么、原文摘录、支撑哪条判据。
 
-**Demos — can the check actually fail?**
+**演示——这个检查真的会失败吗？**
 
-- `N1` **The output must contain `FAIL`.** A demo that never fails proves the check is empty.
-- `N2` **A crash is not a failure demo.** A traceback means the tool broke, not that the check detected a wrong answer.
-- `N3` **Say what you broke.** Each demo needs a non-empty `mutate`; restoring is good practice but is **not** machine-checked.
-- `DE1` **Concrete output.** The recorded result must contain a number or an error code; "it errored" is not enough.
+- `N1` **actual 里要有 `FAIL`**：从不失败的演示说明检查是空的。
+- `N2` **崩溃不算失败演示**：报 Traceback 说明工具坏了，不是检查抓到了错。
+- `N3` **写清改坏了什么**：每条演示的 `mutate` 不能为空；复原是好习惯，但检查器**不**验证复原。
+- `DE1` **actual 要具体**：得有数字或错误码；只写"报错了"不算。
 
-**Order and honesty — did it happen in the right order?**
+**顺序与诚实——是不是按顺序做的？**
 
-- `SR1` **Source shape, again.** URLs must contain `http(s)://`; derived sources must contain a digit.
-- `ORD1` **Criteria before artifact.** If you declare the order, criteria must precede the product — no writing tests after seeing the answer.
-- `CE1` **Claims need events.** If a criterion says "实测" (measured), there must be demo records behind it.
-- `CH1` **No idling.** If metrics give steps and claims, steps/claims must be ≤5.
-- `SS1` **No self-scoring.** If the block says "everything passed", demos must cover all criteria; otherwise it is self-congratulation.
-- `S1` **All green on the first try?** Then require at least 3 demos; a single green demo is suspicious.
-- `X1` **Three outside views.** If you provide `outside`, fill all three views (user / adversary / maintainer); omit the section entirely if it does not apply — a partial section fails.
-- `R5` **Fix what is fixable.** Every uncovered item is classified `可修` / `不可修` / `需外部`; the latter two need a reason; if anything is `可修`, `repair` must be non-empty.
+- `SR1` **来源形状**：URL 必须含 `http(s)://`；推导来源必须含数字。
+- `ORD1` **判据先于产物**：声明了顺序，就必须先写判据再动手，不能看到答案再补测试。
+- `CE1` **声称要有事件**：判据里写"实测"，就必须有对应演示记录。
+- `CH1` **无空转**：给了步数和断言数时，步数/断言数 ≤5。
+- `SS1` **不许自评**：块里写"已全部通过"，演示就必须覆盖全部判据，否则算自我打分。
+- `S1` **首轮全绿要 ≥3 条演示**：一次就全过，只给 1 条演示很可疑。
+- `X1` **表外三问**：如果写了 `outside`，三个视角（使用者/对抗者/维护者）都要填；确实不适用就整节省略，填一半算失败。
+- `R5` **可修必修**：未覆盖项要分类为 可修/不可修/需外部；后两类要写原因；有"可修"时 `repair` 不能为空。
 
 ---
 
-## 4. Literature basis — what each source supports, and what it does not
+## 4. 文献依据：每条支持什么、不能推出什么
 
-The claim of this repository is deliberately modest: **for no-oracle tasks, forcing falsifiable necessary conditions and checking them externally should reduce silent errors per token spent.** The table maps each mechanism to its source and states the inference gap.
+本仓库的主张是克制的：**在无 oracle 任务上，强制可证伪的必要条件并用外部检查，应当降低"每花一份 token 就悄悄出错"的概率。** 下表逐条对应，并写明推断缺口。
 
-| Mechanism | Source | What the source establishes | What it does **not** establish |
+| 机制 | 文献 | 文献建立了什么 | 不能建立什么 |
 |---|---|---|---|
-| Inventory → `inventory` + `A3-1` | [8] | Checklists catch omissions in inspections | That an LLM follows a checklist; that the inventory is complete |
-| Metamorphic relations → `invariants` + `A5-1` | [2], [3] | Relations serve as oracles without ground truth | That the chosen relation is strong enough |
-| Mutation demos → `demos` + `N1/N2/N3/DE1` | [4], [5] | Mutants test whether tests detect faults; equivalent mutants are a limit | That a textual "FAIL" equals a real mutation run (the host does not re-execute demos) |
-| Cross-artifact consistency → `consistency` + `A4-1` | [6], [7] | Independent representations expose disagreements | That the two representations are independent |
-| External checker + same-turn correction | [9], [10] | Self-correction without external feedback is unreliable; iterative self-critique is weak | That this checker is strong enough; that the model accepts the correction |
-| Structured self-verification block | [11] | Backward verification with structured questions improves reasoning scores | That structured blocks alone improve factual correctness |
-| Deterministic rules instead of an LLM judge | [12] | LLM judges show position, verbosity, and self-enhancement biases | That rule-based checks are unbiased or ungameable |
-| Not equating "all checks pass" with quality | [13] | Over-optimizing a proxy degrades the true objective (Goodhart) | That this plugin avoids Goodhart |
-| Threat model: anti-laziness, not anti-adversary | [14] | Monitoring must be evaluated against intentional subversion | That this plugin resists deliberate gaming |
-| Spending test-time compute | [15] | Test-time compute helps, but allocation should adapt to difficulty | That a fixed protocol is compute-optimal |
-| Effort over tool access | [16] (observational) | Observed association between effort and first-try reliability | That this plugin raises effort or transfers to other tasks |
+| 清点 → `inventory` + `A3-1` | [8] | 审查检查单能抓遗漏 | 模型会照做；清单本身完整 |
+| 变质关系 → `invariants` + `A5-1` | [2]、[3] | 关系可在无真值时充当判据 | 选的关系足够强 |
+| 变异演示 → `demos` + `N1/N2/N3/DE1` | [4]、[5] | 变异体能检验测试是否抓错；等价变异体是边界 | 文本"FAIL"等于真的跑过变异（宿主不重跑） |
+| 跨产物一致 → `consistency` + `A4-1` | [6]、[7] | 独立表示的分歧能暴露错误 | 两份表示真的独立 |
+| 外部检查 + 同轮修正 | [9]、[10] | 无外部反馈自我纠错不可靠；迭代自评弱 | 本检查器足够强；模型会接受修正 |
+| 结构化自验证块 | [11] | 带结构化问题的后向验证能提升推理分数 | 结构化块本身能保证事实正确 |
+| 用确定性规则而非 LLM 判官 | [12] | LLM 判官有位置/冗长/自偏好偏差 | 规则检查无偏、不可被套路 |
+| 不把"全过"当质量 | [13] | 过度优化代理指标会伤害真实目标（Goodhart） | 插件能避免 Goodhart |
+| 威胁模型：防懒不防恶 | [14] | 监控协议必须按"故意颠覆"评估 | 插件能抗蓄意作弊 |
+| 花测试时算力 | [15] | 测试时计算有效，但应按难度自适应分配 | 固定协议是 compute-optimal |
+| 努力 > 工具 | [16]（观察性） | 观察到努力与首次正确率相关 | 插件提高了努力，或能迁移到别的任务 |
 
-**No cherry-picking**: these sources support *components* in related settings; none evaluates this plugin end-to-end. The end-to-end claim remains a hypothesis supported by mechanism and small-scale measurements.
+**没有断章取义**：这些文献支持的是**部件**在相近场景下的有效性；没有一篇评估过本插件端到端。端到端主张仍是"机制论证 + 小规模实测"支撑的假设。
 
 ---
 
-## 5. Evaluation (what was measured)
+## 5. 评估（实测）
 
-Cost A/B on a small deterministic task (median + population SD), fresh sub-sessions, baseline first:
+小任务（中位数 + 总体标准差）A/B，全新子会话，基线先跑：
 
-| Version | Baseline tokens | v5 tokens | Ratio |
+| 版本 | 基线 token | v5 token | 倍率 |
 |---|---|---|---|
 | 0.1.5 | 47,335 | 106,551 | 2.25× |
 | 0.1.7 | 109,072 | 128,109 | 1.17× |
 | 0.1.8 | 194,906 | 125,152 | 0.64× |
 | 0.1.9 | 107,577 | 124,932 | 1.16× |
 
-Four measured ratios are ≤3×. One corrected-compliance run reached **3.82×** (10 calls, 416,157 tokens vs 109,072) because two failed checks triggered rework loops; this is documented, not hidden.
+四组 ≤3×。一次合规修正轮达到 **3.82×**（10 次调用、416,157 token 对 109,072），原因是两次失败触发返工循环；已如实记录。
 
-Compliance:
+合规：
 
-- Compliant sample block: **25/25**.
-- Legacy block without the three sections: **20/25** (`A3-1`, `A5-1`, `A4-1`, `INV1`, `KIND1`).
-- Field runs: `v5 check (step): 23/25 T4,N1` and `24/25 T4` — the checker ran and injected failures; the model did not always fix them within the turn (a model-layer limit).
+- 合规样例：**25/25**；
+- 缺三件套的旧块：**20/25**（`A3-1/A5-1/A4-1/INV1/KIND1`）；
+- 真机：`v5 check (step): 23/25 T4,N1`、`24/25 T4`——检查与注入都实际发生；模型不总在本轮改完（模型层限制）。
 
-**Not measured**: answer quality at scale, statistical significance, cross-model replication, long-horizon tasks.
-
----
-
-## 6. Install
-
-Recommended: DSH Desktop → Settings → Plugins → install this package (plugin manager / marketplace channel). It appears under **Installed** and can be disabled or removed there.
-
-Offline fallback: `pwsh -File .\install.ps1` copies the package to `profiles/web/vendor/` and appends a row to `cordis.patch.yml`. Do not use both paths at once.
-
-The checker requires Python (`python` / `py` / `python3`, or `DSH_DEEPER_THINK_PYTHON` / config `pythonPath`). Without Python the checker is skipped and the host reports "not run" instead of silently passing.
+**未测**：大规模答案质量、统计显著性、跨模型复现、长程任务。
 
 ---
 
-## 7. Repository layout
+## 6. 安装
+
+推荐：DSH Desktop → 设置 → 插件 → 安装本包（插件管理器/商城通道）；之后可在**已安装**里停用或卸载。
+
+离线兜底：`pwsh -File .\install.ps1` 复制到 `profiles/web/vendor/` 并往 `cordis.patch.yml` 追加一行。两条路径不要同时用。
+
+检查器需要 Python（`python`/`py`/`python3`，或 `DSH_DEEPER_THINK_PYTHON` / 配置 `pythonPath`）。没有 Python 时检查器跳过，宿主报告"未运行"，不会假装通过。
+
+---
+
+## 7. 目录
 
 ```
 dsh-deeper-think/
 ├─ lib/
-│  ├─ client.js          # lightning button, per-session state, DOM
-│  ├─ index.js           # host entry, HTTP route, seats
-│  ├─ v5.js              # snapshot, discipline card, gates, block extraction, checks
+│  ├─ client.js          # 闪电按钮、按会话状态、DOM
+│  ├─ index.js           # 宿主入口、HTTP 路由、seats
+│  ├─ v5.js              # 快照、纪律卡、闸门、抽块、校验
 │  └─ checkers/
-│     └─ v5check.py      # 27 rules (25 typical)
+│     └─ v5check.py      # 27 条（典型 25）
 ├─ docs/
-│  ├─ PLUGIN_EXPLAINED.md # component-by-component rationale + theory
-│  ├─ COST_TRIALS.md      # A/B cost measurements and caveats
-│  └─ TASK_detect_v5.md   # reproducible detection task
+│  ├─ PLUGIN_EXPLAINED.md # 部件级原理与依据
+│  ├─ COST_TRIALS.md      # 成本实测与偏差
+│  └─ TASK_detect_v5.md   # 可复跑的检测任务
 ├─ cordis.patch.yml
 ├─ package.json
 ├─ install.ps1 / uninstall.ps1
@@ -269,24 +269,24 @@ dsh-deeper-think/
 
 ---
 
-## 8. Limitations and threat model
+## 8. 限制与威胁模型
 
-- **Draft first**: DSH exposes no hook to intercept an assistant message before it is shown. Checking happens at `step/end`; the model may finish without applying the correction. The failure is recorded and carried to the next turn, but the current answer has already been shown.
-- **Block-only**: the checker sees the structured block, not the prose.
-- **Textual demos**: the host does not re-execute `demos[].actual`; it validates shape and concreteness only. Mutation testing's real strength (executing mutants) is only partially realized.
-- **Goodhart risk**: a model can learn to write blocks that pass rules without improving the answer. `uncovered`, `X1`, and the "do not equate all-pass with quality" rule mitigate but do not eliminate this.
-- **Not anti-adversarial**: the threat model is laziness/sloppiness, not intentional subversion [14].
-- **Python dependency** and **DSH version coupling** (`agent/pre-step`, `tools/pre-execute`, `tools/post-execute`, `session/event`).
-
----
-
-## 9. License
-
-MIT — see [LICENSE](LICENSE).
+- **草稿先显示**：DSH 没有"拦截助手消息"的钩子；检查在 `step/end`，模型可能不修就结束本轮。失败会被记录并带到下一轮，但当前回答已经发出。
+- **只查块**：检查器看结构化块，不看正文。
+- **演示是文本**：宿主不重跑 `demos[].actual`，只校验形状与具体性；变异测试"真执行"的强度只实现了一部分。
+- **Goodhart 风险**：模型可能学会写"能过规则的块"而不改进答案；`uncovered`、`X1` 与"全过≠质量"只能缓解。
+- **不抗蓄意欺骗**：威胁模型是懒/马虎，不是故意颠覆 [14]。
+- **依赖 Python** 与 **DSH 版本耦合**（`agent/pre-step`、`tools/pre-execute`、`tools/post-execute`、`session/event`）。
 
 ---
 
-## 10. References
+## 9. 许可证
+
+MIT，见 [LICENSE](LICENSE)。
+
+---
+
+## 10. 参考文献
 
 [1] K. R. Popper, *The Logic of Scientific Discovery*. London, U.K.: Hutchinson, 1959.
 
