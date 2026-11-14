@@ -1,6 +1,6 @@
 # dsh-deeper-think
 
-[English](README.md) | **简体中文**
+[English](README.en.md) | **简体中文**
 
 给 DSH Desktop 的模型选择器加一个闪电开关：开启后，多花的 token 不是用来写更长的回答，而是用来产出**对无标准答案（无 oracle）问题的可证伪检查**；插件还会验证模型真的执行了这些检查，而不是口头宣称。
 
@@ -264,7 +264,7 @@ dsh-deeper-think/
 ├─ install.ps1 / uninstall.ps1
 ├─ HOST_WIRING.md
 ├─ LICENSE
-└─ README.md / README.zh-CN.md
+└─ README.md / README.en.md
 ```
 
 ---

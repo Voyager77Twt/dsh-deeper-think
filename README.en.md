@@ -1,6 +1,6 @@
 # dsh-deeper-think
 
-**English** | [简体中文](README.zh-CN.md)
+**English** | [简体中文](README.md)
 
 A DSH Desktop composer plugin that spends the extra tokens on **falsifiable checks for questions without an oracle** — rather than on longer answers — and verifies that the model actually performed those checks.
 
@@ -264,7 +264,7 @@ dsh-deeper-think/
 ├─ install.ps1 / uninstall.ps1
 ├─ HOST_WIRING.md
 ├─ LICENSE
-└─ README.md / README.zh-CN.md
+└─ README.md / README.en.md
 ```
 
 ---
