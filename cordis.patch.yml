@@ -2,3 +2,8 @@
 - insert:
     - id: dsh-deeper-think
       name: 'dsh-deeper-think'
+      config:
+        search:
+          decision: model   # model | strict
+          ceiling: 8        # 每回合检索查询上限（模型预算不能超过它）
+          fetchCeiling: 24  # 每回合打开来源/抓取上限

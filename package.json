@@ -1,19 +1,9 @@
 {
   "name": "dsh-deeper-think",
-  "version": "0.1.9",
+  "version": "0.1.18",
   "private": true,
   "type": "module",
-  "description": "v5 protocol toggle for no-oracle tasks: structured evidence + host-side falsifiable checks",
-  "author": "七七 (Voyager77Twt)",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Voyager77Twt/dsh-deeper-think.git"
-  },
-  "homepage": "https://github.com/Voyager77Twt/dsh-deeper-think#readme",
-  "bugs": {
-    "url": "https://github.com/Voyager77Twt/dsh-deeper-think/issues"
-  },
+  "description": "v5 protocol toggle with model-decided search, settings, and host-side checks",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
@@ -31,5 +21,34 @@
       ],
       "platform": "web"
     }
-  }
+  },
+  "author": "七七 (Voyager77Twt)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Voyager77Twt/dsh-deeper-think.git"
+  },
+  "homepage": "https://github.com/Voyager77Twt/dsh-deeper-think#readme",
+  "bugs": {
+    "url": "https://github.com/Voyager77Twt/dsh-deeper-think/issues"
+  },
+  "scripts": {
+    "pack": "npm pack --cache .npm-cache"
+  },
+  "files": [
+    "lib/client.js",
+    "lib/index.js",
+    "lib/v5.js",
+    "lib/search-policy.js",
+    "lib/checkers/",
+    "cordis.patch.yml",
+    "install.ps1",
+    "uninstall.ps1",
+    "README.md",
+    "README.en.md",
+    "LICENSE",
+    "HOST_WIRING.md",
+    "AI_INSTALL.md",
+    "docs/"
+  ]
 }

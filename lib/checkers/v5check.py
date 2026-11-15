@@ -43,13 +43,18 @@ def num(x):
     m = re.search(r'[-+]?\d+(?:\.\d+)?', str(x or ''))
     return float(m.group(0)) if m else None
 
-def check(block):
-    b = block or {}
-    bd = b.get('boundary') or {}
+def as_dicts(x):
+    return [i for i in x if isinstance(i, dict)] if isinstance(x, list) else []
+
+def check(block, mode=None):
+    b = block if isinstance(block, dict) else {}
+    bd = b.get('boundary')
+    if not isinstance(bd, dict):
+        bd = {}
     dims_hit = [d for d in DIMS if d in bd]
     add(len(dims_hit) >= 6, 'B1', '八维覆盖 %d/8' % len(dims_hit), '命中: ' + ' '.join(dims_hit))
 
-    amb = bd.get('ambiguity') or []
+    amb = bd.get('ambiguity') if isinstance(bd.get('ambiguity'), list) else []
     amb_ok = [a for a in amb if isinstance(a, dict) and a.get('read_a') and a.get('read_b')
               and (a.get('pick') or a.get('delta')) and a.get('why')]
     if amb:
@@ -58,7 +63,7 @@ def check(block):
     else:
         add(False, 'B2', '没有歧义记录', '')
 
-    ext = bd.get('extensions') or []
+    ext = bd.get('extensions') if isinstance(bd.get('extensions'), list) else []
     if ext:
         bad = [e for e in ext if not (isinstance(e, dict) and e.get('name') and e.get('why'))]
         add(not bad, 'B3', '扩展维度 %d 条' % len(ext), '' if not bad else '缺理由: %d' % len(bad))
@@ -66,7 +71,7 @@ def check(block):
         add(True, 'B3', '跳过（无扩展维度）', '')
 
     # A3 清点：源→产物集合（或写明不适用）
-    inv = b.get('inventory') or []
+    inv = b.get('inventory') if isinstance(b.get('inventory'), list) else []
     if inv:
         bad_inv = [i for i in inv if not (isinstance(i, dict) and (
             str(i.get('na') or '').strip() or (i.get('from') is not None and i.get('to') is not None)))]
@@ -76,7 +81,7 @@ def check(block):
         add(False, 'A3-1', '没有清点（inventory）', '给 源→产物 集合，或 {"na":"原因"}')
 
     # A5 变质：变换 T + 关系 R + 实测
-    invr = b.get('invariants') or []
+    invr = b.get('invariants') if isinstance(b.get('invariants'), list) else []
     if invr:
         bad_iv = [i for i in invr if not (isinstance(i, dict) and (
             str(i.get('na') or '').strip() or (i.get('transform') and i.get('relation')
@@ -87,7 +92,7 @@ def check(block):
         add(False, 'A5-1', '没有变质关系（invariants）', '给 变换T+关系R+实测，或 {"na":"原因"}')
 
     # A4 跨产物一致：两处表示对账
-    cons = b.get('consistency') or []
+    cons = b.get('consistency') if isinstance(b.get('consistency'), list) else []
     if cons:
         bad_c = [i for i in cons if not (isinstance(i, dict) and (
             str(i.get('na') or '').strip() or (i.get('a') and i.get('b') and ('same' in i))))]
@@ -96,8 +101,11 @@ def check(block):
     else:
         add(False, 'A4-1', '没有跨产物一致（consistency）', '给两份表示对账，或 {"na":"原因"}（单产物）')
 
-    crit = b.get('criteria') or []
-    if not crit:
+    crit_raw = b.get('criteria')
+    crit = as_dicts(crit_raw)
+    if isinstance(crit_raw, list) and len(crit_raw) != len(crit):
+        add(False, 'T1', '判据含非对象条目', '')
+    elif not crit:
         add(False, 'T1', '没有判据', '')
     else:
         no_ref = [c.get('id', '?') for c in crit if not str(c.get('ref') or '').strip()]
@@ -131,7 +139,7 @@ def check(block):
         add(not loose, 'TOL', '容差 %d/%d 合规' % (len(crit) - len(loose), len(crit)),
             '' if not loose else ','.join(loose[:6]))
 
-    demos = b.get('demos') or []
+    demos = as_dicts(b.get('demos'))
     if crit:
         ids = {c.get('id') for c in crit}
         covered = {d.get('id') for d in demos}
@@ -174,8 +182,8 @@ def check(block):
         add(not bad_src_shape, 'SR1', '来源形状 %d/%d' % (len(crit) - len(bad_src_shape), len(crit)),
             '' if not bad_src_shape else '可疑: ' + ','.join(bad_src_shape[:6]))
 
-    reqs = b.get('requirements')
-    if isinstance(reqs, list) and reqs:
+    reqs = as_dicts(b.get('requirements'))
+    if reqs:
         ids = {c.get('id') for c in crit}
         bad = []
         for r in reqs:
@@ -189,14 +197,48 @@ def check(block):
     else:
         add(True, 'A1', '跳过（无 requirements）', '')
 
-    searches = b.get('searches')
-    if isinstance(searches, list) and searches:
-        bad = [x for x in searches
-               if not (x.get('query') and x.get('opened') and x.get('excerpt') and x.get('payload'))]
-        add(not bad, 'D1', '检索账本 %d 条' % len(searches),
-            '' if not bad else '缺检索式/摘录/载荷性: %d' % len(bad))
+    searches_raw = b.get('searches')
+    searches = as_dicts(searches_raw)
+    if isinstance(searches_raw, list) and searches_raw:
+        bad = [x for x in searches_raw
+               if not (isinstance(x, dict) and x.get('query') and x.get('opened') and x.get('excerpt') and x.get('payload'))]
+        add(not bad, 'D1', '检索账本 %d 条' % len(searches_raw),
+            '' if not bad else '缺检索式/摘录/载荷性或非对象: %d' % len(bad))
     else:
         add(True, 'D1', '跳过（无 searches）', '')
+
+    # D2/D3：检索账本的必填与质量（由宿主 --mode 决定是否强制）
+    entries = searches
+    if mode == 'research-first':
+        add(bool(entries), 'D2', '研究型检索账本 %d 条' % len(entries),
+            '' if entries else '至少 1 条 searches（query/purpose/opened/excerpt/payload/not_covered）')
+    if entries:
+        purposes = ('orientation', 'targeted', 'cross-check', 'gap', 'saturation')
+        bad_se = []
+        seen_q = set()
+        for x in entries:
+            q = str(x.get('query') or '').strip()
+            pu = str(x.get('purpose') or '').strip()
+            op = str(x.get('opened') or '').strip()
+            ex = str(x.get('excerpt') or '').strip()
+            pay = str(x.get('payload') or '').strip()
+            nc = str(x.get('not_covered') or '').strip()
+            tag = q[:18] or '?'
+            if len(q) < 4 or q in seen_q:
+                bad_se.append(tag + '(query 太短/重复)')
+            seen_q.add(q)
+            if pu not in purposes:
+                bad_se.append(tag + '(purpose 非法)')
+            if not op:
+                bad_se.append(tag + '(缺 opened)')
+            if len(ex) < 10 or len(ex) > 300:
+                bad_se.append(tag + '(excerpt 长度)')
+            if not pay:
+                bad_se.append(tag + '(缺 payload)')
+            if not nc:
+                bad_se.append(tag + '(缺 not_covered)')
+        add(not bad_se, 'D3', '检索账本质量 %d 条（问题 %d 处）' % (len(entries), len(bad_se)),
+            '' if not bad_se else '; '.join(bad_se[:5]))
 
     scoped = [c for c in crit if 'scope' in c]
     if scoped:
@@ -215,13 +257,20 @@ def check(block):
     else:
         add(True, 'X1', '跳过（无 outside 字段）', '')
 
-    unc = b.get('uncovered')
-    rep = b.get('repair') or []
-    if unc is None:
+    unc_raw = b.get('uncovered')
+    rep = b.get('repair')
+    rep = rep if isinstance(rep, list) else []
+    if unc_raw is None:
         add(True, 'R5', '跳过（无 uncovered）', '')
+    elif not isinstance(unc_raw, list):
+        add(False, 'R5', 'uncovered 不是数组', '')
     else:
+        unc = as_dicts(unc_raw)
+        bad_type = len(unc_raw) != len(unc)
         kinds = [u.get('kind') for u in unc]
         bad_kind = [u.get('text', '?') for u in unc if u.get('kind') not in ('可修', '不可修', '需外部')]
+        if bad_type:
+            bad_kind.append('非对象')
         bad_reason = [u.get('text', '?') for u in unc
                       if u.get('kind') in ('不可修', '需外部') and not u.get('reason')]
         fixable = [u for u in unc if u.get('kind') == '可修']
@@ -264,12 +313,12 @@ def check(block):
     score = len(dims_hit) * 2 + len(ext) * 2 + len(amb) + len(crit)
     return score
 
-def main(path, as_json=False):
+def main(path, as_json=False, mode=None):
     block = load(path)
     if block is None:
         print('  找不到 v5.json：%s' % path)
         return 2
-    score = check(block)
+    score = check(block, mode)
     passed = sum(1 for r in res if r['ok'])
     out = {'path': path, 'score': score, 'checks': res,
            'result': 'PASS' if passed == len(res) else 'FAIL'}
@@ -284,4 +333,8 @@ def main(path, as_json=False):
 
 if __name__ == '__main__':
     p = sys.argv[1] if len(sys.argv) > 1 else '.'
-    sys.exit(main(p, '--json' in sys.argv))
+    mode = None
+    if '--mode' in sys.argv:
+        i = sys.argv.index('--mode')
+        mode = sys.argv[i + 1] if i + 1 < len(sys.argv) else None
+    sys.exit(main(p, '--json' in sys.argv, mode))
